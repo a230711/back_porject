@@ -17,58 +17,67 @@ app.use(express.json())
 app.post(multer().none(),(req,res,next)=>{next()})
 /* ------------------------------------------------- */
 
-/* ----------外送員接單(API)------------ */
+/* ----------------外送員接單------------------ */
 
 async function getListData(req, res){
-    // const sql1 = "SELECT shop_sid FROM shop_order WHERE deliver_take = 0" ;
-    const sql1 = "SELECT shop.sid, shop.name, shop.address FROM shop RIGHT JOIN shop_order on shop.sid = shop_order.shop_sid ";
+    const sql1 = "SELECT shop_order.sid, shop_order.member_sid, shop_order.order_sid, shop_order.shop_sid, shop.name, shop.address FROM shop RIGHT JOIN shop_order on shop.sid = shop_order.shop_sid ";
     [rows1] = await db.query(sql1);
-    const sql2 = `SELECT * FROM deliver LIMIT 7 `;
-    [rows2] = await db.query(sql2);
-
     return {rows1};
 }
 
-/* ----------------------------- */
+/* ------------------------------------------ */
 
-/* --------外送員登入(處理完成有新問題)--------- */
+/* ----------外送員登入------------ */
 app.post('/deliverlogin', async(req, res)=>{
     const output = {
         success: false,
         error: '帳密錯誤',
         postData: req.body,  //除錯用
+        auth: {}
     }
-    // console.log(req.body.email);   //透過multer解析出來
     const sql = `SELECT * FROM deliver WHERE email=?`;
     const [rows] = await db.query(sql, [req.body.email]);
     if(!rows.length){
         return res.json(output)  //只執行這一次不會返回重跑
     }
     const row = rows[0];
-    // console.log(row);
+    console.log(row);
     output.success = await bcrypt.compare(req.body.password, row['password']); 
     if(output.success){
-        output.error = '';
-        const {sid, name} = row;
-        // const token = jwt.sign({sid, name, email}, process.env.JWT_SECRET);     //還沒理解(有問題)
-        // console.log(token);
+        output.error = '';  
+        const {sid, name, online_status} = row;   //這裡是key
+        const token = jwt.sign({sid,name,online_status}, 'lkasdjglkdfjl');  //這裡是value(想用這個不行process.env.JWT_SECRET)
         output.auth = {
             sid,
             name,
-            // token,
-        }
-        res.json(output);
-    }
-
-    
+            token,
+        }    
+    }   
+    res.json(output);
 })
 /* ----------------------------- */
 
 /* ----------外送員接單------------ */
-app.get(['/api', '/api/list'], async (req, res)=>{
+app.get('/api', async (req, res)=>{
     res.json(await getListData(req, res));
 });
 /* ----------------------------- */
+/* ----------外送員訂單確認------------ */
+app.post('/sendOrder', async (req, res)=>{
+    const sqlenter = "INSERT INTO `deliver_order`(`member_sid`, `shop_sid`, `deliver_sid`, `store_order_sid`, `order_sid`, `order_finish`, `deliver_fee`, `deliver_memo`, `deliver_check_time`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+    const [result] = await db.query(sqlenter, [req.body.member_sid, req.body.shop_sid, req.body.deliver_sid, req.body.store_order_sid, req.body.order_sid, req.body.order_finish, req.body.deliver_fee, req.body.deliver_memo]);
+    res.json(result);
+})
+/* --------------------------------- */
+/* ----------接單後訂單預覽------------- */
+app.get('/deliverorder/:id', async(req, res)=>{
+    const sql1 ="SELECT member.name,  shop.name AS shopname, shop.address, shop.phone, member.name, deliver_order.deliver_memo,  deliver_order.deliver_fee, deliver_order.order_sid FROM (deliver_order INNER JOIN shop ON deliver_order.shop_sid = shop.sid) INNER JOIN member ON deliver_order.member_sid = member.sid WHERE order_sid = ?";
+    const [rows] = await db.query(sql1, [req.params.id]);
+    const sql2 ="SELECT products.name, products.price, order_detail.amount FROM (order_detail INNER JOIN products ON order_detail.product_sid = products.sid ) WHERE order_detail.order_sid = ?";
+    const [food] = await db.query(sql2, [req.params.id]);
+    res.json({rows,food});
+})
+/* ---------------------------------- */
 
 /* --------取得外送員sid--------- */
 app.post('/deliver/:sid', async(req, res)=>{
@@ -78,7 +87,6 @@ app.post('/deliver/:sid', async(req, res)=>{
 })
 
 /* ----------------------------- */
-
 
 app.use('/edit/:sid', async(req, res)=>{
     const sql = "SELECT * FROM shop_order WHERE sid=?";
